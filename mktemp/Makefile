@@ -7,21 +7,23 @@
 # and Makefile.postamble (both optional), and Makefile will include them.
 #
 
-NAME = su
+NAME = mktemp
 
 PROJECTVERSION = 2.8
 PROJECT_TYPE = Tool
 
-CFILES = su.c
+HFILES = 
 
-OTHERSRCS = Makefile Makefile.preamble Makefile.postamble su.1
+CFILES = mktemp.c
+
+OTHERSRCS = Makefile Makefile.preamble Makefile.postamble mktemp.1
 
 
 MAKEFILEDIR = $(MAKEFILEPATH)/pb_makefiles
 CODE_GEN_STYLE = DYNAMIC
 MAKEFILE = tool.make
 NEXTSTEP_INSTALLDIR = /usr/bin
-LIBS = -lpam -lpam_misc
+LIBS = 
 DEBUG_LIBS = $(LIBS)
 PROF_LIBS = $(LIBS)
 

@@ -7,21 +7,21 @@
 # and Makefile.postamble (both optional), and Makefile will include them.
 #
 
-NAME = su
+NAME = killall
 
 PROJECTVERSION = 2.8
 PROJECT_TYPE = Tool
 
-CFILES = su.c
+CFILES = killall.c
 
-OTHERSRCS = Makefile Makefile.preamble Makefile.postamble su.1
+OTHERSRCS = Makefile Makefile.preamble Makefile.postamble killall.1
 
 
 MAKEFILEDIR = $(MAKEFILEPATH)/pb_makefiles
 CODE_GEN_STYLE = DYNAMIC
 MAKEFILE = tool.make
 NEXTSTEP_INSTALLDIR = /usr/bin
-LIBS = -lpam -lpam_misc
+LIBS = 
 DEBUG_LIBS = $(LIBS)
 PROF_LIBS = $(LIBS)
 

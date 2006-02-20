@@ -55,6 +55,12 @@ static const char rcsid[] =
 #include <stdlib.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include "get_compat.h"
+#else
+#define COMPAT_MODE(func, mode) 1
+#endif
+
 #include "find.h"
 
 static int	find_compare __P((const FTSENT **s1, const FTSENT **s2));
@@ -218,15 +224,28 @@ find_execute(plan, paths)
 	 * (whether or not it's empty). UNIX conformance... <sigh>
 	 */
 		
+	int strict_symlinks = (ftsoptions & (FTS_COMFOLLOW|FTS_LOGICAL))
+	  && COMPAT_MODE("bin/find", "unix2003");
+
 	myPaths = addPath(NULL, NULL);
 	for (pathIndex = 0; paths[pathIndex] != NULL; ++pathIndex) {
-		/* retrieve mode bits, and examine "searchable" bit of directories */
-		/* exempt root from POSIX conformance */
-		if (getuid() && (stat(paths[pathIndex], &statInfo) == 0) && ((statInfo.st_mode & S_IFMT) == S_IFDIR)) {
+		int stat_ret = stat(paths[pathIndex], &statInfo);
+		int stat_errno = errno;
+		if (strict_symlinks && stat_ret < 0) {
+		    if (stat_errno == ELOOP) {
+			errx(1, "Symlink loop resolving %s", paths[pathIndex]);
+		    }
+		}
+
+		/* retrieve mode bits, and examine "searchable" bit of 
+		  directories, exempt root from POSIX conformance */
+		if (COMPAT_MODE("bin/find", "unix2003") && getuid() 
+		  && stat_ret == 0 
+		  && ((statInfo.st_mode & S_IFMT) == S_IFDIR)) {
 			if ((statInfo.st_mode & (S_IXUSR + S_IXGRP + S_IXOTH)) != 0) {
 				myPaths = addPath(myPaths, paths[pathIndex]);
 			} else {
-				if (errno != ENAMETOOLONG) {	/* if name is too long, just let existing logic handle it */
+				if (stat_errno != ENAMETOOLONG) {	/* if name is too long, just let existing logic handle it */
 					warnx("%s: Permission denied", paths[pathIndex]);
 					nonSearchableDirFound = 1;
 				}
@@ -294,6 +313,10 @@ find_execute(plan, paths)
 	}
 	if (errno)
 		err(1, "fts_read");
+
+	for (p = plan; p; p = p->next) {
+	    if (p->flags & F_CLEANUP) (p->execute)(p, NULL);
+	}
 
 	free (myPaths);
 	return (rval);

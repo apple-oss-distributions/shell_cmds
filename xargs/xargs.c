@@ -66,6 +66,12 @@ __RCSID("$FreeBSD: src/usr.bin/xargs/xargs.c,v 1.41 2002/07/01 03:21:05 tjr Exp 
 
 #include "pathnames.h"
 
+#ifdef __APPLE__
+#include <get_compat.h>
+#else
+#define COMPAT_MODE(a,b) (1)
+#endif /* __APPLE__ */
+
 static void	parse_input(int, char *[]);
 static void	prerun(int, char *[]);
 static int	prompt(void);
@@ -79,6 +85,8 @@ static char *argp, *bbp, *ebp, *inpline, *p, *replstr;
 static const char *eofstr;
 static int count, insingle, indouble, pflag, tflag, Rflag, rval, zflag;
 static int cnt, Iflag, jfound, Lflag, wasquoted, xflag;
+static int last_was_newline = 1;
+static int last_was_blank = 0;
 
 extern char **environ;
 
@@ -133,9 +141,16 @@ main(int argc, char *argv[])
 			break;
 		case 'L':
 			Lflag = atoi(optarg);
+			if (COMPAT_MODE("bin/xargs", "Unix2003")) {
+				nflag = 0; /* Override */
+				nargs = 5000;
+			}
 			break;
 		case 'n':
 			nflag = 1;
+			if (COMPAT_MODE("bin/xargs", "Unix2003")) {
+				Lflag = 0; /* Override */
+			}
 			if ((nargs = atoi(optarg)) <= 0)
 				errx(1, "illegal argument count");
 			break;
@@ -237,6 +252,7 @@ parse_input(int argc, char *argv[])
 {
 	int ch, foundeof;
 	char **avj;
+	int last_was_backslashed = 0;
 
 	foundeof = 0;
 
@@ -247,6 +263,7 @@ parse_input(int argc, char *argv[])
 			exit(rval);
 		goto arg1;
 	case ' ':
+		last_was_blank = 1;
 	case '\t':
 		/* Quotes escape tabs and spaces. */
 		if (insingle || indouble || zflag)
@@ -257,7 +274,19 @@ parse_input(int argc, char *argv[])
 			goto arg2;
 		goto addch;
 	case '\n':
-		count++;
+		if (COMPAT_MODE("bin/xargs", "Unix2003")) {
+			if (last_was_newline) {
+				/* don't count empty line */
+				break;
+			}
+			if (!last_was_blank ) {
+				/* only count if NOT continuation line */
+				count++;
+			} 
+		} else {
+			count++;
+		}
+		last_was_newline = 1;
 		if (zflag)
 			goto addch;
 
@@ -343,6 +372,7 @@ arg2:
 		wasquoted = 1;
 		break;
 	case '\\':
+		last_was_backslashed = 1;
 		if (zflag)
 			goto addch;
 		/* Backslash escapes anything, is escaped by quotes. */
@@ -374,6 +404,10 @@ addch:		if (p < ebp) {
 		*p++ = ch;
 		break;
 	}
+	if (ch != ' ')
+		last_was_blank = 0;
+	if (ch != '\n' || last_was_backslashed)
+		last_was_newline = 0;
 	return;
 }
 

@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD: src/usr.bin/who/who.c,v 1.20 2003/10/26 05:05:48 peter Exp $
 #include <timeconv.h>
 #include <unistd.h>
 #include <utmp.h>
+#include <utmpx.h>
 
 static void	heading(void);
 static void	process_utmp(FILE *);
@@ -69,6 +70,13 @@ static int	sflag;			/* Show name, line, time */
 static int	tflag;			/* time of change to system clock */
 static int	Tflag;			/* Show terminal state */
 static int	uflag;			/* Show idle time */
+#ifdef __APPLE__
+#include <get_compat.h>
+#else  /* !__APPLE__ */
+#define COMPAT_MODE(a,b) (1)
+#endif /* __APPLE__ */
+static int	unix2003_std;
+static struct utmpx *utx_db = NULL;
 
 int
 main(int argc, char *argv[])
@@ -79,6 +87,8 @@ main(int argc, char *argv[])
 	FILE *wtmp_fp;
 
 	setlocale(LC_TIME, "");
+
+	unix2003_std = COMPAT_MODE("bin/who", "unix2003");
 
 	while ((ch = getopt(argc, argv, "abdHlmpqrstTu")) != -1) {
 		switch (ch) {
@@ -177,6 +187,9 @@ main(int argc, char *argv[])
 		}
 	}
 
+	if (utx_db) {
+		endutxent();	/* close db */
+	}
 	exit(0);
 }
 
@@ -199,6 +212,8 @@ heading(void)
 	printf("%-*s ", 12, "TIME");
 	if (uflag)
 		printf("IDLE  ");
+	if (unix2003_std && uflag && !Tflag)
+		printf("     PID ");
 	printf("%-*s", UT_HOSTSIZE, "FROM");
 	putchar('\n');
 }
@@ -212,6 +227,7 @@ row(struct utmp *ut)
 	static int d_first = -1;
 	struct tm *tm;
 	char state;
+	char login_pidstr[20];
 
 	if (d_first < 0)
 		d_first = (*nl_langinfo(D_MD_ORDER) == 'd');
@@ -225,6 +241,29 @@ row(struct utmp *ut)
 			state = sb.st_mode & (S_IWOTH|S_IWGRP) ?
 			    '+' : '-';
 			idle = time(NULL) - sb.st_mtime;
+		}
+		if (unix2003_std && !Tflag) {
+			/* uflag without Tflag */
+			struct utmpx * utx = NULL;
+			if (!utx_db) {
+				utx_db = getutxent(); /* just to open db */
+			}
+			if (utx_db) {
+				struct utmpx this_line;
+				setutxent();	/* reset db */
+				memset(&this_line, 0, sizeof(this_line));
+/*
+				strcpy(this_line.ut_user, ut->ut_name);
+*/
+				strcpy(this_line.ut_line, ut->ut_line);
+				utx = getutxline(&this_line);
+			}
+			if (utx) {
+				snprintf(login_pidstr,sizeof(login_pidstr),
+						"%8d",utx->ut_pid);
+			} else {
+				strcpy(login_pidstr,"       ?");
+			}
 		}
 	}
 
@@ -244,6 +283,9 @@ row(struct utmp *ut)
 			    (int)(idle / 60 % 60));
 		else
 			printf(" old  ");
+		if (unix2003_std && !Tflag) {
+			printf("%s ", login_pidstr);
+		}
 	}
 	if (*ut->ut_host != '\0')
 		printf("(%.*s)", UT_HOSTSIZE, ut->ut_host);

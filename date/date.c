@@ -74,7 +74,7 @@ int retval = 0;
 int  unix2003_std = 0;		/* to determine legacy vs std mode */
 
 int main __P((int, char *[]));
-static void setthetime __P((const char *));
+static void setthetime __P((char *));
 static void badformat __P((void));
 static void badtime __P((void));
 static void usage __P((void));
@@ -90,6 +90,11 @@ main(argc, argv)
 	char *format, buf[1024];
 
 	(void)setlocale(LC_ALL, "");
+
+	if (compat_mode("bin/date", "unix2003"))	/* Determine the STD */
+		unix2003_std = 1;
+	else
+		unix2003_std = 0;
 
 	rflag = 0;
 	while ((ch = getopt(argc, argv, "nr:u")) != -1)
@@ -146,7 +151,7 @@ main(argc, argv)
 
 void
 setthetime(p)
-	const char *p;
+	char *p;
 {
 
 	struct tm *lt;
@@ -169,6 +174,8 @@ setthetime(p)
 
 	lt = localtime(&tval);
 
+	lt->tm_isdst = -1;			/* Divine correct DST */
+
 	if (dot != NULL) {			/* .ss */
 		len = strlen(dot);
 		if (len != 3)
@@ -181,11 +188,6 @@ setthetime(p)
 	}
 
 	yearset = 0;
-
-	if (compat_mode("bin/date", "unix2003"))	/* Determine the STD */
-		unix2003_std = 1;
-	else
-		unix2003_std = 0;
 
 	switch (strlen(p) - len) {
 	case 12:				/* cc */

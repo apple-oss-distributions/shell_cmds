@@ -49,6 +49,8 @@ static const char rcsid[] =
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/timeb.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
 
 #include <dirent.h>
 #include <err.h>
@@ -64,6 +66,12 @@ static const char rcsid[] =
 #include <unistd.h>
 
 #include "find.h"
+
+#ifdef __APPLE__
+#include "get_compat.h"
+#else
+#define COMPAT_MODE(func, mode) 1
+#endif
 
 time_t get_date __P((char *date, struct timeb *now));
 
@@ -227,15 +235,17 @@ f_Xtime(plan, entry)
 {
 	extern time_t now;
 
+	int fudge = COMPAT_MODE("bin/find", "unix2003") ? 0 : 86400 - 1;
+
 	if (plan->flags & F_TIME_C) {
 		COMPARE((now - entry->fts_statp->st_ctime +
-		    86400 - 1) / 86400, plan->t_data);
+		    fudge) / 86400, plan->t_data);
 	} else if (plan->flags & F_TIME_A) {
 		COMPARE((now - entry->fts_statp->st_atime +
-		    86400 - 1) / 86400, plan->t_data);
+		    fudge) / 86400, plan->t_data);
 	} else {
 		COMPARE((now - entry->fts_statp->st_mtime +
-		    86400 - 1) / 86400, plan->t_data);
+		    fudge) / 86400, plan->t_data);
 	}
 }
 
@@ -443,16 +453,81 @@ f_exec(plan, entry)
 	register int cnt;
 	pid_t pid;
 	int status;
-	char *file;
+	char *file = NULL;
+	static char **plus_path = NULL;
+	static int plus_path_cnt = 0;
+	static unsigned long exec_after = 0;
+	static unsigned long path_so_far = 0;
+	struct _ex saved_ex;
 
-	/* XXX - if file/dir ends in '/' this will not work -- can it? */
-	if ((plan->flags & F_EXECDIR) && \
-	    (file = strrchr(entry->fts_path, '/')))
+	if (entry) {
+	    /* XXX - if file/dir ends in '/' this will not work -- can it? */
+	    if ((plan->flags & F_EXECDIR) && 
+	      (file = strrchr(entry->fts_path, '/'))) {
 		file++;
-	else
+	    } else {
 		file = entry->fts_path;
+	    }
 
-	for (cnt = 0; plan->e_argv[cnt]; ++cnt)
+	    if (plan->flags & F_CLEANUP) {
+		plus_path = realloc(plus_path, sizeof(char *) * ++plus_path_cnt);
+		if (!plus_path) errx(1, "out of memory");
+		plus_path[plus_path_cnt -1] = strdup(file);
+		if (!plus_path[plus_path_cnt -1]) errx(1, "out of memory");
+
+		path_so_far += sizeof(char *) + strlen(file);
+
+		if (!exec_after) {
+		    size_t l = sizeof(exec_after);
+		    int rc = 
+		      sysctlbyname("kern.argmax", &exec_after, &l, NULL, NULL);
+		    if (rc < 0) {
+			/* Something conservitave */
+			exec_after = 16 * 1024;
+		    }
+		}
+		if (path_so_far >= exec_after) {
+		    return f_exec(plan, NULL);
+		}
+
+		return 1;
+	    }
+	} else {
+	    if (!plus_path) return 1;
+	    saved_ex = plan->p_un.ex;
+	    int new_len = 0;
+	    int ocnt;
+	    for(cnt = 0; plan->e_argv[cnt]; ++cnt) {
+		if (plan->e_len[cnt]) {
+		    new_len += plus_path_cnt;
+		} else {
+		    new_len++;
+		}
+	    }
+	    new_len++;
+
+	    plan->e_argv = malloc(sizeof(char *) * new_len);
+	    if (!plan->e_argv) errx(1, "out of memory");
+
+	    for(ocnt = cnt = 0; saved_ex._e_argv[ocnt]; ++ocnt) {
+		if (saved_ex._e_len[ocnt]) {
+		    int ppi;
+		    for(ppi = 0; ppi < plus_path_cnt; ++ppi) {
+			plan->e_argv[cnt++] = plus_path[ppi];
+		    }
+#if 0
+		    memmove(plan->e_argv + cnt, *plus_path,
+		      sizeof(char *) * plus_path_cnt);
+		    cnt += plus_path_cnt;
+#endif
+		} else {
+		    plan->e_argv[cnt++] = saved_ex._e_argv[ocnt];
+		}
+	    }
+	    plan->e_argv[cnt++] = NULL;
+	}
+
+	if (!(plan->flags & F_CLEANUP)) for (cnt = 0; plan->e_argv[cnt]; ++cnt)
 		if (plan->e_len[cnt])
 			brace_subst(plan->e_orig[cnt], &plan->e_argv[cnt],
 			    file, plan->e_len[cnt]);
@@ -479,6 +554,20 @@ f_exec(plan, entry)
 		_exit(1);
 	}
 	pid = waitpid(pid, &status, 0);
+	if (plus_path) {
+	    int i;
+	    for(i = 0; i < plus_path_cnt; ++i) {
+		free(plus_path[i]);
+	    }
+	    free(plus_path);
+	    plus_path = NULL;
+	    plus_path_cnt = 0;
+	    plan->p_un.ex = saved_ex;
+	    path_so_far = 0;
+	    if (WIFEXITED(status) && WEXITSTATUS(status)) {
+		exit(WEXITSTATUS(status));
+	    }
+	}
 	return (pid != -1 && WIFEXITED(status) && !WEXITSTATUS(status));
 }
 
@@ -497,6 +586,7 @@ c_exec(option, argvp)
 	PLAN *new;			/* node returned */
 	register int cnt;
 	register char **argv, **ap, *p;
+	int plus_armed = 0;
 
 	/* XXX - was in c_execdir, but seems unnecessary!?
 	ftsoptions &= ~FTS_NOSTAT;
@@ -510,8 +600,18 @@ c_exec(option, argvp)
 		if (!*ap)
 			errx(1,
 			    "%s: no terminating \";\"", option->name);
-		if (**ap == ';')
+		if (**ap == '{' && ap[0][1] == '}' && ap[0][2] == '\0') {
+		    plus_armed = COMPAT_MODE("bin/find", "unix2003");
+		    continue;
+		}
+		if (**ap == ';') {
 			break;
+		}
+		if (plus_armed && **ap == '+') {
+			new->flags |= F_CLEANUP;
+			break;
+		}
+		plus_armed = 0;
 	}
 
 	cnt = ap - *argvp + 1;
@@ -1025,8 +1125,11 @@ c_perm(option, argvp)
 		new->flags |= F_ATLEAST;
 		++perm;
 	} else if (*perm == '+') {
-		new->flags |= F_ANY;
-		++perm;
+		if ((set = setmode(perm +1)) != NULL) {
+		    new->flags |= F_ANY;
+		    ++perm;
+		    free(set);
+		}
 	}
 
 	if ((set = setmode(perm)) == NULL)

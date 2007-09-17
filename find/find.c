@@ -38,10 +38,11 @@
 #if 0
 static char sccsid[] = "@(#)find.c	8.5 (Berkeley) 8/5/94";
 #else
-static const char rcsid[] =
-  "$FreeBSD: src/usr.bin/find/find.c,v 1.7.6.3 2001/05/06 09:53:22 phk Exp $";
 #endif
 #endif /* not lint */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/usr.bin/find/find.c,v 1.18 2006/05/14 20:23:00 krion Exp $");
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,19 +52,19 @@ static const char rcsid[] =
 #include <fts.h>
 #include <regex.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <string.h>
 
 #ifdef __APPLE__
-#include "get_compat.h"
+#include <get_compat.h>
+#include <unistd.h>
 #else
 #define COMPAT_MODE(func, mode) 1
 #endif
 
 #include "find.h"
 
-static int	find_compare __P((const FTSENT **s1, const FTSENT **s2));
+static int find_compare(const FTSENT * const *s1, const FTSENT * const *s2);
 
 /*
  * find_compare --
@@ -72,8 +73,7 @@ static int	find_compare __P((const FTSENT **s1, const FTSENT **s2));
  *	order within each directory.
  */
 static int
-find_compare(s1, s2)
-	const FTSENT **s1, **s2;
+find_compare(const FTSENT * const *s1, const FTSENT * const *s2)
 {
 
 	return (strcoll((*s1)->fts_name, (*s2)->fts_name));
@@ -85,8 +85,7 @@ find_compare(s1, s2)
  *	command arguments.
  */
 PLAN *
-find_formplan(argv)
-	char **argv;
+find_formplan(char *argv[])
 {
 	PLAN *plan, *tail, *new;
 
@@ -124,23 +123,23 @@ find_formplan(argv)
 	 */
 	if (!isoutput) {
 		OPTION *p;
-		char **argv = 0;
+		char **argv1 = 0;
 
 		if (plan == NULL) {
-			p = option("-print");
-			new = (p->create)(p, &argv);
+			p = lookup_option("-print");
+			new = (p->create)(p, &argv1);
 			tail = plan = new;
 		} else {
-			p = option("(");
-			new = (p->create)(p, &argv);
+			p = lookup_option("(");
+			new = (p->create)(p, &argv1);
 			new->next = plan;
 			plan = new;
-			p = option(")");
-			new = (p->create)(p, &argv);
+			p = lookup_option(")");
+			new = (p->create)(p, &argv1);
 			tail->next = new;
 			tail = new;
-			p = option("-print");
-			new = (p->create)(p, &argv);
+			p = lookup_option("-print");
+			new = (p->create)(p, &argv1);
 			tail->next = new;
 			tail = new;
 		}
@@ -207,16 +206,14 @@ FTS *tree;			/* pointer to top of FTS hierarchy */
  *	over all FTSENT's returned for the given search paths.
  */
 int
-find_execute(plan, paths)
-	PLAN *plan;		/* search plan */
-	char **paths;		/* array of pathnames to traverse */
+find_execute(PLAN *plan, char *paths[])
 {
-	register FTSENT *entry;
+	FTSENT *entry;
 	PLAN *p;
 	int rval;
-	char	**myPaths;
-	int	nonSearchableDirFound = 0;
-	int			pathIndex;
+	char **myPaths;
+	int nonSearchableDirFound = 0;
+	int pathIndex;
 	struct stat statInfo;
 
 	/* special-case directories specified on command line - explicitly examine
@@ -265,6 +262,11 @@ find_execute(plan, paths)
 		err(1, "ftsopen");
 
 	for (rval = nonSearchableDirFound; (entry = fts_read(tree)) != NULL;) {
+		if (maxdepth != -1 && entry->fts_level >= maxdepth) {
+			if (fts_set(tree, entry, FTS_SKIP))
+				err(1, "%s", entry->fts_path);
+		}
+
 		switch (entry->fts_info) {
 		case FTS_D:
 			if (isdepth)
@@ -304,20 +306,11 @@ find_execute(plan, paths)
 		 * the work specified by the user on the command line.
 		 */
 		for (p = plan; p && (p->execute)(p, entry); p = p->next);
-
-		if (maxdepth != -1 && entry->fts_level >= maxdepth) {
-			if (fts_set(tree, entry, FTS_SKIP))
-			err(1, "%s", entry->fts_path);
-			continue;
-		}
 	}
+	free (myPaths);
+	finish_execplus();
 	if (errno)
 		err(1, "fts_read");
-
-	for (p = plan; p; p = p->next) {
-	    if (p->flags & F_CLEANUP) (p->execute)(p, NULL);
-	}
-
-	free (myPaths);
+	fts_close(tree);
 	return (rval);
 }

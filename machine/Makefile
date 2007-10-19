@@ -1,8 +1,8 @@
-Project = false
+Project = machine
 Install_Dir = /usr/bin
 
-CFILES = false.c
-MANPAGES = false.1
+CFILES = machine.c
+MANPAGES = machine.1
 
 Extra_CC_Flags = -Wall -mdynamic-no-pic
 Extra_LD_Flags = -dead_strip

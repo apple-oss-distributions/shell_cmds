@@ -1,9 +1,8 @@
-/*-
- * Copyright (c) 1990, 1993, 1994
+/*	$NetBSD: what.c,v 1.6 1997/10/20 03:16:31 lukem Exp $	*/
+
+/*
+ * Copyright (c) 1980, 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
- *
- * This code is derived from software contributed to Berkeley by
- * Cimarron D. Taylor of the University of California, Berkeley.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,6 +12,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
  * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -30,80 +33,65 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
 #ifndef lint
-#if 0
-static char sccsid[] = "@(#)misc.c	8.2 (Berkeley) 4/1/94";
-#else
-#endif
+__COPYRIGHT("@(#) Copyright (c) 1980, 1988, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n");
 #endif /* not lint */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/usr.bin/find/misc.c,v 1.13 2010/12/11 08:32:16 joel Exp $");
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)what.c	8.1 (Berkeley) 6/6/93";
+#endif
+__RCSID("$NetBSD: what.c,v 1.6 1997/10/20 03:16:31 lukem Exp $");
+#endif /* not lint */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <err.h>
-#include <errno.h>
-#include <fts.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
-#include "find.h"
+void search __P((void));
+int main __P((int, char **));
 
 /*
- * brace_subst --
- *	Replace occurrences of {} in s1 with s2 and return the result string.
+ * what
  */
-void
-brace_subst(char *orig, char **store, char *path, int len)
+/* ARGSUSED */
+int
+main(argc, argv)
+	int argc;
+	char **argv;
 {
-	int plen;
-	char ch, *p;
-
-	plen = strlen(path);
-	for (p = *store; (ch = *orig) != '\0'; ++orig)
-		if (ch == '{' && orig[1] == '}') {
-			while ((p - *store) + plen > len)
-				if (!(*store = realloc(*store, len *= 2)))
-					err(1, NULL);
-			memmove(p, path, plen);
-			p += plen;
-			++orig;
-		} else
-			*p++ = ch;
-	*p = '\0';
+	if (!*++argv) 
+		search();
+	else do {
+		if (!freopen(*argv, "r", stdin)) {
+			perror(*argv);
+			exit(1);
+		}
+		printf("%s\n", *argv);
+		search();
+	} while(*++argv);
+	exit(0);
 }
 
-/*
- * queryuser --
- *	print a message to standard error and then read input from standard
- *	input. If the input is an affirmative response (according to the
- *	current locale) then 1 is returned.
- */
-int
-queryuser(char *argv[])
+void
+search()
 {
-	char *p, resp[256];
+	int c;
 
-	(void)fprintf(stderr, "\"%s", *argv);
-	while (*++argv)
-		(void)fprintf(stderr, " %s", *argv);
-	(void)fprintf(stderr, "\"? ");
-	(void)fflush(stderr);
-
-	if (fgets(resp, sizeof(resp), stdin) == NULL)
-		*resp = '\0';
-	if ((p = strchr(resp, '\n')) != NULL)
-		*p = '\0';
-	else {
-		(void)fprintf(stderr, "\n");
-		(void)fflush(stderr);
+	while ((c = getchar()) != EOF) {
+loop:		if (c != '@')
+			continue;
+		if ((c = getchar()) != '(')
+			goto loop;
+		if ((c = getchar()) != '#')
+			goto loop;
+		if ((c = getchar()) != ')')
+			goto loop;
+		putchar('\t');
+		while ((c = getchar()) != EOF && c && c != '"' &&
+		    c != '>' && c != '\n')
+			putchar(c);
+		putchar('\n');
 	}
-#ifdef __APPLE__
-        return (resp[0] == 'y');
-#else
-        return (rpmatch(resp) == 1);
-#endif
 }

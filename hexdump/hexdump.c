@@ -1,9 +1,6 @@
-/*-
- * Copyright (c) 1990, 1993, 1994
+/*
+ * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
- *
- * This code is derived from software contributed to Berkeley by
- * Cimarron D. Taylor of the University of California, Berkeley.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,6 +10,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
  * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -31,79 +32,55 @@
  */
 
 #ifndef lint
-#if 0
-static char sccsid[] = "@(#)misc.c	8.2 (Berkeley) 4/1/94";
-#else
-#endif
+static const char copyright[] =
+"@(#) Copyright (c) 1989, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
+#ifndef lint
+#if 0
+static char sccsid[] = "@(#)hexdump.c	8.1 (Berkeley) 6/6/93";
+#endif
+#endif /* not lint */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/usr.bin/find/misc.c,v 1.13 2010/12/11 08:32:16 joel Exp $");
+__FBSDID("$FreeBSD: src/usr.bin/hexdump/hexdump.c,v 1.7 2002/09/04 23:29:01 dwmalone Exp $");
 
 #include <sys/types.h>
-#include <sys/stat.h>
-
-#include <err.h>
-#include <errno.h>
-#include <fts.h>
-#include <stdio.h>
+#include <locale.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include "hexdump.h"
 
-#include "find.h"
+FS *fshead;				/* head of format strings */
+int blocksize;				/* data block size */
+int exitval;				/* final exit value */
+int length = -1;			/* max bytes to read */
 
-/*
- * brace_subst --
- *	Replace occurrences of {} in s1 with s2 and return the result string.
- */
-void
-brace_subst(char *orig, char **store, char *path, int len)
-{
-	int plen;
-	char ch, *p;
-
-	plen = strlen(path);
-	for (p = *store; (ch = *orig) != '\0'; ++orig)
-		if (ch == '{' && orig[1] == '}') {
-			while ((p - *store) + plen > len)
-				if (!(*store = realloc(*store, len *= 2)))
-					err(1, NULL);
-			memmove(p, path, plen);
-			p += plen;
-			++orig;
-		} else
-			*p++ = ch;
-	*p = '\0';
-}
-
-/*
- * queryuser --
- *	print a message to standard error and then read input from standard
- *	input. If the input is an affirmative response (according to the
- *	current locale) then 1 is returned.
- */
 int
-queryuser(char *argv[])
+main(int argc, char *argv[])
 {
-	char *p, resp[256];
+	FS *tfs;
+	char *p;
 
-	(void)fprintf(stderr, "\"%s", *argv);
-	while (*++argv)
-		(void)fprintf(stderr, " %s", *argv);
-	(void)fprintf(stderr, "\"? ");
-	(void)fflush(stderr);
+	(void)setlocale(LC_ALL, "");
 
-	if (fgets(resp, sizeof(resp), stdin) == NULL)
-		*resp = '\0';
-	if ((p = strchr(resp, '\n')) != NULL)
-		*p = '\0';
-	else {
-		(void)fprintf(stderr, "\n");
-		(void)fflush(stderr);
+	if (!(p = rindex(argv[0], 'o')) || strcmp(p, "od"))
+		newsyntax(argc, &argv);
+	else
+		oldsyntax(argc, &argv);
+
+	/* figure out the data block size */
+	for (blocksize = 0, tfs = fshead; tfs; tfs = tfs->nextfs) {
+		tfs->bcnt = size(tfs);
+		if (blocksize < tfs->bcnt)
+			blocksize = tfs->bcnt;
 	}
-#ifdef __APPLE__
-        return (resp[0] == 'y');
-#else
-        return (rpmatch(resp) == 1);
-#endif
+	/* rewrite the rules, do syntax checking */
+	for (tfs = fshead; tfs; tfs = tfs->nextfs)
+		rewrite(tfs);
+
+	(void)next(argv);
+	display();
+	exit(exitval);
 }

@@ -1,6 +1,6 @@
 /*-
- * Copyright (c) 1993
- *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 2014 Pietro Cerutti <gahr@FreeBSD.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -25,11 +25,53 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)extern.h	8.1 (Berkeley) 5/31/93
- * $FreeBSD$
  */
 
-extern int retval;
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
-int	netsettime(time_t);
+#ifndef __APPLE__
+#include <sys/capsicum.h>
+
+#include <capsicum_helpers.h>
+#endif
+#include <err.h>
+#include <errno.h>
+#include <utmpx.h>
+
+#include <algorithm>
+#include <iostream>
+#include <iterator>
+#include <set>
+#include <string>
+using namespace std;
+
+int
+main(int argc, char **)
+{
+	struct utmpx *ut;
+	set<string> names;
+
+	if (argc > 1) {
+		cerr << "usage: users" << endl;
+		return (1);
+	}
+
+	setutxent();
+
+#ifndef __APPLE__
+	if (caph_enter())
+		err(1, "Failed to enter capability mode.");
+#endif
+	while ((ut = getutxent()) != NULL)
+		if (ut->ut_type == USER_PROCESS)
+			names.insert(ut->ut_user);
+	endutxent();
+
+	if (!names.empty()) {
+		set<string>::iterator last = names.end();
+		--last;
+		copy(names.begin(), last, ostream_iterator<string>(cout, " "));
+		cout << *last << endl;
+	}
+}
